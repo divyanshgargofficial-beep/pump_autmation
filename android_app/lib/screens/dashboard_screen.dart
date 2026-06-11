@@ -152,7 +152,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _refresh,
+        onRefresh: () => _refresh(),
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
@@ -223,7 +223,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               onStart: () => _runCommand((api) => api.startPump()),
               onStop: () => _runCommand((api) => api.stopPump()),
               onClear: () => _runCommand((api) => api.clearLock()),
-              onRefresh: _refresh,
+              onRefresh: () => _refresh(),
             ),
           ],
         ),

@@ -157,7 +157,6 @@ The app stores the value locally with `shared_preferences`.
 - The app uses the mDNS hostname directly instead of performing a subnet scan.
 - The ESP8266 Wi-Fi credentials are still compiled into firmware.
 - The generated Android project was created statically because Flutter execution was unavailable in this environment.
-- Gradle wrapper files are not included; if your Flutter install requires them, run `flutter create . --platforms=android --project-name water_tank_controller` inside `android_app` to regenerate platform wrappers without replacing `lib/`.
 
 ## Future Improvements
 

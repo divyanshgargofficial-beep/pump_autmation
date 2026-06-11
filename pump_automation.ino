@@ -1,139 +1,136 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <ESP8266mDNS.h>
 
 #define RELAY_PIN 5          // D1
 #define WATER_SENSOR_PIN 0   // D3
 
 const char* ssid = "Airtel_divy_7892_2.4Ghz";
 const char* password = "air72986";
+const char* mdnsName = "watertank";
 
 ESP8266WebServer server(80);
 
-bool lightState = false;
+bool pumpRunning = false;
 bool tankFull = false;
+bool lockout = false;
+unsigned long pumpStartedAt = 0;
 
-unsigned long onStart = 0;
-
-// ==================================================
-String webpage()
+void writePump(bool running)
 {
-    float seconds = 0;
+    digitalWrite(RELAY_PIN, running ? LOW : HIGH); // Relay is active low.
+    pumpRunning = running;
 
-    if (lightState)
+    if (running)
     {
-        seconds = (millis() - onStart) / 1000.0;
-    }
-
-    String page =
-        "<!DOCTYPE html><html><head>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-        "<meta http-equiv='refresh' content='1'>"
-
-        "<style>"
-        "body{font-family:Arial;text-align:center;margin-top:40px;}"
-        "button{width:140px;height:60px;font-size:22px;margin:10px;border:none;border-radius:12px;}"
-        ".on{background:#4CAF50;color:white;}"
-        ".off{background:#f44336;color:white;}"
-        "</style>"
-
-        "</head><body>";
-
-    page += "<h2>Water Tank Controller</h2>";
-
-    page += "<h3>Motor State: ";
-    page += (lightState ? "ON" : "OFF");
-    page += "</h3>";
-
-    page += "<h3>Tank Status: ";
-    page += (tankFull ? "FULL" : "FILLING");
-    page += "</h3>";
-
-    page += "<h3>Run Time: ";
-    page += String(seconds, 1);
-    page += " sec</h3>";
-
-    page += "<a href='/on'><button class='on'>ON</button></a>";
-    page += "<a href='/off'><button class='off'>OFF</button></a>";
-
-    page += "</body></html>";
-
-    return page;
-}
-
-// ==================================================
-void handleRoot()
-{
-    server.send(200, "text/html", webpage());
-}
-
-// ==================================================
-void handleOn()
-{
-    if (tankFull)
-    {
-        server.send(200, "text/html", webpage());
-        return;
-    }
-
-    if (!lightState)
-    {
-        lightState = true;
-        onStart = millis();
-    }
-
-    digitalWrite(RELAY_PIN, LOW); // ON (active low)
-
-    server.send(200, "text/html", webpage());
-}
-
-// ==================================================
-void handleOff()
-{
-    digitalWrite(RELAY_PIN, HIGH); // OFF
-
-    lightState = false;
-    onStart = 0;
-
-    server.send(200, "text/html", webpage());
-}
-
-// ==================================================
-void detection()
-{
-    // INPUT_PULLUP:
-    // Dry  = HIGH
-    // Water = LOW
-
-    if (digitalRead(WATER_SENSOR_PIN) == LOW)
-    {
-        tankFull = true;
-
-        digitalWrite(RELAY_PIN, HIGH); // OFF
-
-        lightState = false;
-        onStart = 0;
+        pumpStartedAt = millis();
     }
     else
     {
-        tankFull = false;
+        pumpStartedAt = 0;
     }
 }
 
-// ==================================================
-void setup()
+unsigned long runtimeSeconds()
 {
-    Serial.begin(115200);
+    if (!pumpRunning || pumpStartedAt == 0)
+    {
+        return 0;
+    }
 
-    pinMode(RELAY_PIN, OUTPUT);
-    pinMode(WATER_SENSOR_PIN, INPUT_PULLUP);
+    return (millis() - pumpStartedAt) / 1000;
+}
 
-    // Relay OFF at startup
-    digitalWrite(RELAY_PIN, HIGH);
+String statusJson(bool success = true)
+{
+    String json = "{";
+    json += "\"success\":";
+    json += success ? "true" : "false";
+    json += ",\"wifiConnected\":";
+    json += WiFi.status() == WL_CONNECTED ? "true" : "false";
+    json += ",\"pump\":";
+    json += pumpRunning ? "true" : "false";
+    json += ",\"tankFull\":";
+    json += tankFull ? "true" : "false";
+    json += ",\"lockout\":";
+    json += lockout ? "true" : "false";
+    json += ",\"runtime\":";
+    json += runtimeSeconds();
+    json += "}";
+    return json;
+}
 
+void sendJson(int statusCode, const String& body)
+{
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(statusCode, "application/json", body);
+}
+
+void sendNotFound()
+{
+    sendJson(404, "{\"success\":false,\"error\":\"not_found\"}");
+}
+
+void handleStatus()
+{
+    sendJson(200, statusJson());
+}
+
+void handleOn()
+{
+    if (lockout)
+    {
+        sendJson(423, "{\"success\":false,\"error\":\"lockout_active\"}");
+        return;
+    }
+
+    if (tankFull)
+    {
+        lockout = true;
+        writePump(false);
+        sendJson(409, "{\"success\":false,\"error\":\"tank_full\"}");
+        return;
+    }
+
+    writePump(true);
+    sendJson(200, "{\"success\":true}");
+}
+
+void handleOff()
+{
+    writePump(false);
+    sendJson(200, "{\"success\":true}");
+}
+
+void handleReset()
+{
+    lockout = false;
+    writePump(false);
+    sendJson(200, "{\"success\":true}");
+}
+
+void updateTankState()
+{
+    bool detectedFull = digitalRead(WATER_SENSOR_PIN) == LOW; // INPUT_PULLUP: water = LOW.
+    tankFull = detectedFull;
+
+    if (detectedFull)
+    {
+        if (pumpRunning)
+        {
+            writePump(false);
+        }
+
+        lockout = true;
+    }
+}
+
+void connectWiFi()
+{
+    WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
 
-    Serial.print("Connecting");
-
+    Serial.print("Connecting to WiFi");
     while (WiFi.status() != WL_CONNECTED)
     {
         delay(500);
@@ -141,20 +138,48 @@ void setup()
     }
 
     Serial.println();
-    Serial.print("Connected! Open: http://");
+    Serial.print("Connected. IP: ");
     Serial.println(WiFi.localIP());
 
-    server.on("/", handleRoot);
-    server.on("/on", handleOn);
-    server.on("/off", handleOff);
+    if (MDNS.begin(mdnsName))
+    {
+        MDNS.addService("http", "tcp", 80);
+        Serial.print("mDNS started: http://");
+        Serial.print(mdnsName);
+        Serial.println(".local");
+    }
+    else
+    {
+        Serial.println("mDNS start failed");
+    }
+}
 
+void setupRoutes()
+{
+    server.on("/", HTTP_GET, handleStatus);
+    server.on("/status", HTTP_GET, handleStatus);
+    server.on("/on", HTTP_GET, handleOn);
+    server.on("/off", HTTP_GET, handleOff);
+    server.on("/reset", HTTP_GET, handleReset);
+    server.onNotFound(sendNotFound);
     server.begin();
 }
 
-// ==================================================
+void setup()
+{
+    Serial.begin(115200);
+
+    pinMode(RELAY_PIN, OUTPUT);
+    pinMode(WATER_SENSOR_PIN, INPUT_PULLUP);
+    writePump(false);
+
+    connectWiFi();
+    setupRoutes();
+}
+
 void loop()
 {
+    updateTankState();
     server.handleClient();
-
-    detection();
+    MDNS.update();
 }

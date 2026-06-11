@@ -64,8 +64,8 @@ flowchart LR
 4. Update these constants if needed:
 
 ```cpp
-const char* ssid = "Airtel_divy_7892_2.4Ghz";
-const char* password = "air72986";
+const char* ssid = "wifi_name";
+const char* password = "password";
 const char* mdnsName = "watertank";
 ```
 

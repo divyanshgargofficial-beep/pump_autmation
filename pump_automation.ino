@@ -1,11 +1,12 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include "secrets.h"
 
 #define RELAY_PIN 5          // D1
 #define WATER_SENSOR_PIN 0   // D3
 
-const char* ssid = "Airtel_divy_7892_2.4Ghz";
-const char* password = "air72986";
+const char* ssid = WIFI_SSID;
+const char* password = WIFI_PASSWORD;
 
 ESP8266WebServer server(80);
 
